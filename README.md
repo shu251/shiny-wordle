@@ -3,6 +3,10 @@
 https://sarah-k-hu.shinyapps.io/wordle-axial/
 
 
+```
+deployApp('wordle-axial/')
+```
+
 ### References
 
 Forked from https://winston.shinyapps.io/wordle/
