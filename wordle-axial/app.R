@@ -1,12 +1,18 @@
 library(shiny)
 library(htmltools)
+library(lubridate)
+library(tidyverse)
+
 
 source("wordlist.R")
 
 ui <- fluidPage(
-    theme = bslib::bs_theme(version = 4),
-    title = "Axial Seamount wordle",
-    tags$style(HTML("
+  theme = bslib::bs_theme(version = 4),
+  # div(img(src = 'logos-2.png', height = '300px', align = "center"), style="text-align: center;"), # adds image up front
+  # navbarPage(header = div(img(src="logos-2.png", height = '300px', align = "center")), fluid = FALSE, position = "static-top"),
+  # title = img(src = 'logos-2.png', height = '300px', align = "center"),
+  title = "Axial Seamount Wordle",
+  tags$style(HTML("
   .container-fluid {
       text-align: center;
       height: calc(100vh - 30px);
@@ -108,14 +114,19 @@ ui <- fluidPage(
   }
 ")),
 div(
-    class = "guesses",
-    h3("Axial Seamount wordle"),
-    uiOutput("previous_guesses"),
-    uiOutput("current_guess"),
-    uiOutput("endgame"),
-    uiOutput("new_game_ui")
+  class = "guesses",
+  h3(img(src = 'logos-3.png', height = '300px', align = "center")),
+  h2("Axial Seamount Wordle"),
+  uiOutput("previous_guesses"),
+  uiOutput("current_guess"),
+  uiOutput("endgame"),
+  uiOutput("new_game_ui"),
+  uiOutput("new_game_url"),
+  uiOutput("new_game_hash"),
+  uiOutput("new_game_insta")
 ),
 uiOutput("keyboard"),
+  # div(img(src = 'logos-2.png', height = '400px', align = "center"), style="text-align: center;"),
 # div(
 #   style="display: inline-block;",
 #   checkboxInput("hard", "Hard mode")
@@ -166,242 +177,276 @@ tags$script(HTML("
   "))
 )
 
+# Combine all word lists
+words_all <- c(words_common, words_all)
 
-# Set the random seed based on the date, so that the same word is used during
-# each day.
-set.seed(as.integer(Sys.Date()))
-# target_word <- sample(words_common, 1)
+library(lubridate)
+
+d <- today(tzone = "PST")
+
+todays_value <- data.frame(DATE = date_range) %>%
+  mutate(NUM = row_number()) %>%
+  filter(DATE == d) %>%
+  select(NUM) %>%
+  as.numeric()
 
 server <- function(input, output) {
-    target_word <- reactiveVal(sample(words_common, 1))
-    # target_word <- sample(words_common, 1)
-    all_guesses <- reactiveVal(list())
-    finished <- reactiveVal(FALSE)
-    current_guess_letters <- reactiveVal(character(0))
+  # target_word <- reactiveVal(sample(words_common, 1))
+  target_word <- reactiveVal(words_common[todays_value])
+  all_guesses <- reactiveVal(list())
+  finished <- reactiveVal(FALSE)
+  current_guess_letters <- reactiveVal(character(0))
 
-    # reset_game <- function() {
-    #     target_word(sample(words_common, 1))
-    #     all_guesses(list())
-    #     finished(FALSE)
+  # reset_game <- function() {
+  #   target_word(sample(words_common, 1))
+  #   all_guesses(list())
+  #   finished(FALSE)
+  # }
+
+
+  observeEvent(input$Enter, {
+    guess <- paste(current_guess_letters(), collapse = "")
+
+    if (! guess %in% words_all)
+      return()
+
+    # if (input$hard) {
+    # # Letters in the target word that the player has previously
+    # # guessed correctly.
+    # matched_letters = used_letters().intersection(set(target_word()))
+    # if not set(guess).issuperset(matched_letters):
+    #     return
     # }
 
+    all_guesses_new <- all_guesses()
 
-    observeEvent(input$Enter, {
-        guess <- paste(current_guess_letters(), collapse = "")
+    check_result <- check_word(guess, target_word())
+    all_guesses_new[[length(all_guesses_new) + 1]] <- check_result
+    all_guesses(all_guesses_new)
 
-        if (! guess %in% words_all)
-            return()
+    if (isTRUE(check_result$win)) {
+      finished(TRUE)
+    }
 
-        # if (input$hard) {
-        # # Letters in the target word that the player has previously
-        # # guessed correctly.
-        # matched_letters = used_letters().intersection(set(target_word()))
-        # if not set(guess).issuperset(matched_letters):
-        #     return
-        # }
+    current_guess_letters(character(0))
+  })
 
-        all_guesses_new <- all_guesses()
-
-        check_result <- check_word(guess, target_word())
-        all_guesses_new[[length(all_guesses_new) + 1]] <- check_result
-        all_guesses(all_guesses_new)
-
-        if (isTRUE(check_result$win)) {
-            finished(TRUE)
-        }
-
-        current_guess_letters(character(0))
+  output$previous_guesses <- renderUI({
+    res <- lapply(all_guesses(), function(guess) {
+      letters <- guess$letters
+      row <- mapply(
+        letters,
+        guess$matches,
+        FUN = function(letter, match) {
+          # This will have the value "correct", "in-word", or "not-in-word", and
+          # those values are also used as CSS class names.
+          match_type <- match
+          div(toupper(letter), class = paste("letter", match_type))
+        },
+        SIMPLIFY = FALSE,
+        USE.NAMES = FALSE
+      )
+      div(class = "word", row)
     })
 
-    output$previous_guesses <- renderUI({
-        res <- lapply(all_guesses(), function(guess) {
-            letters <- guess$letters
-            row <- mapply(
-                letters,
-                guess$matches,
-                FUN = function(letter, match) {
-                    # This will have the value "correct", "in-word", or "not-in-word", and
-                    # those values are also used as CSS class names.
-                    match_type <- match
-                    div(toupper(letter), class = paste("letter", match_type))
-                },
-                SIMPLIFY = FALSE,
-                USE.NAMES = FALSE
-            )
-            div(class = "word", row)
-        })
-
-        scroll_js <- "
+    scroll_js <- "
         document.querySelector('.guesses')
           .scrollTo(0, document.querySelector('.guesses').scrollHeight);
     "
-        tagList(res, tags$script(HTML(scroll_js)))
-    })
+    tagList(res, tags$script(HTML(scroll_js)))
+  })
 
-    output$current_guess <- renderUI({
-        if (finished()) return()
+  output$current_guess <- renderUI({
+    if (finished()) return()
 
-        letters <- current_guess_letters()
+    letters <- current_guess_letters()
 
-        # Fill in blanks for letters up to length of target word. If letters is:
-        #   "a" "r"
-        # then result is:
-        #   "a" "r" "" "" ""
-        target_length <- isolate(nchar(target_word()))
-        if (length(letters) < target_length) {
-            letters[(length(letters)+1) : target_length] <- ""
-        }
+    # Fill in blanks for letters up to length of target word. If letters is:
+    #   "a" "r"
+    # then result is:
+    #   "a" "r" "" "" ""
+    target_length <- isolate(nchar(target_word()))
+    if (length(letters) < target_length) {
+      letters[(length(letters)+1) : target_length] <- ""
+    }
 
-        div(
-            class = "word",
-            lapply(letters, function(letter) {
-                div(toupper(letter), class ="letter guess")
-            })
-        )
-    })
-
-    # output$new_game_ui <- renderUI({
-    #     if (!finished())
-    #         return()
-    #
-    #     actionButton("new_game", "New Game")
-    # })
-
-    # observeEvent(input$new_game, {
-    #     reset_game()
-    # })
-
-    used_letters <- reactive({
-        # This is a named list. The structure will be something like:
-        # list(p = "not-in-word", a = "in-word", e = "correct")
-        letter_matches <- list()
-
-        # Populate `letter_matches` by iterating over all letters in all the guesses.
-        lapply(all_guesses(), function(guess) {
-            mapply(guess$letters, guess$matches, SIMPLIFY = FALSE, USE.NAMES = FALSE,
-                   FUN = function(letter, match) {
-                       prev_match <- letter_matches[[letter]]
-                       if (is.null(prev_match)) {
-                           # If there isn't an existing entry for that letter, just use it.
-                           letter_matches[[letter]] <<- match
-                       } else {
-                           # If an entry is already present, it can be "upgraded":
-                           # "not-in-word" < "in-word" < "correct"
-                           if (match == "correct" && prev_match %in% c("not-in-word", "in-word")) {
-                               letter_matches[[letter]] <<- match
-                           } else if (match == "in-word" && prev_match == "not-in-word") {
-                               letter_matches[[letter]] <<- match
-                           }
-                       }
-                   }
-            )
-        })
-
-        letter_matches
-    })
-
-
-    keys <- list(
-        c("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"),
-        c("A", "S", "D", "F", "G", "H", "J", "K", "L"),
-        c("Enter", "Z", "X", "C", "V", "B", "N", "M", "Back")
+    div(
+      class = "word",
+      lapply(letters, function(letter) {
+        div(toupper(letter), class ="letter guess")
+      })
     )
+  })
 
-    output$keyboard <- renderUI({
-        prev_match_type <- used_letters()
-        keyboard <- lapply(keys, function(row) {
-            row_keys <- lapply(row, function(key) {
-                class <- "key"
-                key_lower <- tolower(key)
-                if (!is.null(prev_match_type[[key_lower]])) {
-                    class <- c(class, prev_match_type[[key_lower]])
-                }
-                if (key %in% c("Enter", "Back")) {
-                    class <- c(class, "wide-key")
-                }
-                actionButton(key, key, class = class)
-            })
-            div(class = "keyboard-row", row_keys)
-        })
+  output$new_game_ui <- renderUI({
+    if (!finished())
+      return()
+    target_description <- (description[todays_value])
+    out <- print(target_description)
+    scroll_js <- "
+        document.querySelector('.guesses')
+          .scrollTo(0, document.querySelector('.guesses').scrollHeight);
+    "
+    tagList(out, tags$script(HTML(scroll_js)))
+  })
 
-        div(class = "keyboard", keyboard)
+  output$new_game_url <- renderUI({
+    if (!finished())
+      return()
+    url_today <- (urls[todays_value])
+    tags$a(href=url_today, "Learn more!")
+    # actionLink("webpage","Learn more", onclick ="window.open(url_today, '_blank')")
+  })
+
+  output$new_game_hash <- renderUI({
+    if (!finished())
+      return()
+    actionLink("webpage","Follow us on twitter #protatax", onclick ="window.open('https://twitter.com/hashtag/protatax?src=hashtag_click', '_blank')")
+  })
+
+  output$new_game_insta <- renderUI({
+    if (!finished())
+      return()
+    actionLink("webpage","or instagram #protatax", onclick ="window.open('https://www.instagram.com/explore/tags/protatax/', '_blank')")
+  })
+
+  observeEvent(input$new_game, {
+    # reset_game()
+    # actionLink("webpage","Learn more")
+  })
+
+  used_letters <- reactive({
+    # This is a named list. The structure will be something like:
+    # list(p = "not-in-word", a = "in-word", e = "correct")
+    letter_matches <- list()
+
+    # Populate `letter_matches` by iterating over all letters in all the guesses.
+    lapply(all_guesses(), function(guess) {
+      mapply(guess$letters, guess$matches, SIMPLIFY = FALSE, USE.NAMES = FALSE,
+             FUN = function(letter, match) {
+               prev_match <- letter_matches[[letter]]
+               if (is.null(prev_match)) {
+                 # If there isn't an existing entry for that letter, just use it.
+                 letter_matches[[letter]] <<- match
+               } else {
+                 # If an entry is already present, it can be "upgraded":
+                 # "not-in-word" < "in-word" < "correct"
+                 if (match == "correct" && prev_match %in% c("not-in-word", "in-word")) {
+                   letter_matches[[letter]] <<- match
+                 } else if (match == "in-word" && prev_match == "not-in-word") {
+                   letter_matches[[letter]] <<- match
+                 }
+               }
+             }
+      )
     })
 
-    # Add listeners for each key, except Enter and Back
-    lapply(unlist(keys, recursive = FALSE), function(key) {
-        if (key %in% c("Enter", "Back")) return()
-        observeEvent(input[[key]], {
-            if (finished())
-                return()
-            cur <- current_guess_letters()
-            if (length(cur) >= 5)
-                return()
-            current_guess_letters(c(cur, tolower(key)))
-        })
-    })
+    letter_matches
+  })
 
-    observeEvent(input$Back, {
-        if (length(current_guess_letters()) > 0) {
-            current_guess_letters(current_guess_letters()[-length(current_guess_letters())])
+
+  keys <- list(
+    c("Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"),
+    c("A", "S", "D", "F", "G", "H", "J", "K", "L"),
+    c("Enter", "Z", "X", "C", "V", "B", "N", "M", "Back")
+  )
+
+  output$keyboard <- renderUI({
+    prev_match_type <- used_letters()
+    keyboard <- lapply(keys, function(row) {
+      row_keys <- lapply(row, function(key) {
+        class <- "key"
+        key_lower <- tolower(key)
+        if (!is.null(prev_match_type[[key_lower]])) {
+          class <- c(class, prev_match_type[[key_lower]])
         }
+        if (key %in% c("Enter", "Back")) {
+          class <- c(class, "wide-key")
+        }
+        actionButton(key, key, class = class)
+      })
+      div(class = "keyboard-row", row_keys)
     })
 
+    div(class = "keyboard", keyboard)
+  })
 
-    output$endgame <- renderUI({
-        if (!finished())
-            return()
-
-        lines <- lapply(all_guesses(), function(guess) {
-            line <- vapply(guess$matches, function(match) {
-                switch(match,
-                       "correct" = "🟩",
-                       "in-word" = "🟨",
-                       "not-in-word" = "⬜"
-                )
-            }, character(1))
-
-            div(paste(line, collapse = ""))
-        })
-
-        div(class = "endgame-content", lines)
+  # Add listeners for each key, except Enter and Back
+  lapply(unlist(keys, recursive = FALSE), function(key) {
+    if (key %in% c("Enter", "Back")) return()
+    observeEvent(input[[key]], {
+      if (finished())
+        return()
+      cur <- current_guess_letters()
+      if (length(cur) >= 5)
+        return()
+      current_guess_letters(c(cur, tolower(key)))
     })
+  })
+
+  observeEvent(input$Back, {
+    if (length(current_guess_letters()) > 0) {
+      current_guess_letters(current_guess_letters()[-length(current_guess_letters())])
+    }
+  })
+
+
+  output$endgame <- renderUI({
+    if (!finished())
+      return()
+
+    lines <- lapply(all_guesses(), function(guess) {
+      line <- vapply(guess$matches, function(match) {
+        switch(match,
+               "correct" = "🟩",
+               "in-word" = "🟨",
+               "not-in-word" = "⬜"
+        )
+      }, character(1))
+
+      div(paste(line, collapse = ""))
+    })
+
+    div(class = "endgame-content", lines)
+  })
 
 }
 
 check_word <- function(guess_str, target_str) {
-    guess <- strsplit(guess_str, "")[[1]]
-    target <- strsplit(target_str, "")[[1]]
-    remaining <- character(0)
+  guess <- strsplit(guess_str, "")[[1]]
+  target <- strsplit(target_str, "")[[1]]
+  remaining <- character(0)
 
-    if (length(guess) != length(target)) {
-        stop("Word lengths don't match.")
+  if (length(guess) != length(target)) {
+    stop("Word lengths don't match.")
+  }
+
+  result <- rep("not-in-word", length(guess))
+
+  # First pass: find matches in correct position. Letters in the target that do
+  # not match the guess are added to the remaining list.
+  for (i in seq_along(guess)) {
+    if (guess[i] == target[i]) {
+      result[i] <- "correct"
+    } else {
+      remaining <- c(remaining, target[i])
     }
+  }
 
-    result <- rep("not-in-word", length(guess))
-
-    # First pass: find matches in correct position. Letters in the target that do
-    # not match the guess are added to the remaining list.
-    for (i in seq_along(guess)) {
-        if (guess[i] == target[i]) {
-            result[i] <- "correct"
-        } else {
-            remaining <- c(remaining, target[i])
-        }
+  for (i in seq_along(guess)) {
+    if (guess[i] != target[i] && guess[i] %in% remaining) {
+      result[i] <- "in-word"
+      remaining <- remaining[-match(guess[i], remaining)]
     }
+  }
 
-    for (i in seq_along(guess)) {
-        if (guess[i] != target[i] && guess[i] %in% remaining) {
-            result[i] <- "in-word"
-            remaining <- remaining[-match(guess[i], remaining)]
-        }
-    }
-
-    list(
-        word = guess_str,
-        letters = guess,
-        matches = result,
-        win = all(result == "correct")
-    )
+  list(
+    word = guess_str,
+    letters = guess,
+    matches = result,
+    win = all(result == "correct")
+  )
 }
 
 shinyApp(ui, server)
+
